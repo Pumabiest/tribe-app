@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TRIBE Admin</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0b0b12; color: #f2f0f7; max-width: 900px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 16px; margin-top: 32px; color: #a29fb5; text-transform: uppercase; letter-spacing: 1px; }
+  input, textarea { width: 100%; background: #14141f; border: 1px solid #2b2b3d; color: #f2f0f7; border-radius: 8px; padding: 10px; font-size: 14px; box-sizing: border-box; }
+  button { cursor: pointer; border: none; border-radius: 8px; padding: 8px 14px; font-weight: 600; background: #ff3fa4; color: white; margin-top: 6px; }
+  button.secondary { background: #2b2b3d; color: #f2f0f7; }
+  .card { background: #191926; border: 1px solid #2b2b3d; border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+  .muted { color: #a29fb5; font-size: 13px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-left: 8px; }
+  .badge.open { background: rgba(255,63,164,0.15); color: #ff3fa4; }
+  .badge.closed { background: rgba(41,224,201,0.15); color: #29e0c9; }
+  .badge.pending { background: rgba(250, 199, 117, 0.15); color: #fac775; }
+  .badge.active { background: rgba(41,224,201,0.15); color: #29e0c9; }
+  .badge.rejected { background: rgba(226, 75, 74, 0.15); color: #e24b4a; }
+  #key-gate { max-width: 400px; margin: 80px auto; text-align: center; }
+</style>
+</head>
+<body>
+
+<div id="key-gate">
+  <h1>TRIBE Admin</h1>
+  <p class="muted">Admin-Schlüssel eingeben (steht im Terminal, wenn der Server startet, falls keine ADMIN_KEY-Umgebungsvariable gesetzt ist).</p>
+  <input type="password" id="admin-key-input" placeholder="Admin-Schlüssel" />
+  <button id="unlock-btn" style="width:100%; margin-top:10px;">Anmelden</button>
+  <p id="key-error" class="muted"></p>
+</div>
+
+<div id="admin-app" style="display:none;">
+  <h1>TRIBE Admin</h1>
+  <h2>Werbeanzeigen</h2>
+  <div id="ads"></div>
+  <h2>Support-Tickets</h2>
+  <div id="tickets"></div>
+</div>
+
+<script>
+let ADMIN_KEY = localStorage.getItem("tribe_admin_key") || "";
+
+async function adminFetch(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { "Content-Type": "application/json", "X-Admin-Key": ADMIN_KEY, ...(opts.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Fehler");
+  return data;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str ?? "";
+  return div.innerHTML;
+}
+
+async function loadTickets() {
+  const tickets = await adminFetch("/api/admin/support");
+  const el = document.getElementById("tickets");
+  if (tickets.length === 0) {
+    el.innerHTML = `<p class="muted">Keine Tickets bisher.</p>`;
+    return;
+  }
+  el.innerHTML = tickets
+    .map(
+      (t) => `
+    <div class="card" data-id="${t.id}">
+      <div class="row">
+        <div>
+          <strong>${escapeHtml(t.subject)}</strong>
+          <span class="badge ${t.status}">${t.status === "open" ? "offen" : "geschlossen"}</span>
+          <div class="muted">${escapeHtml(t.email)} · ${new Date(t.created_at).toLocaleString("de-DE")}</div>
+        </div>
+      </div>
+      <p>${escapeHtml(t.message)}</p>
+      <textarea class="reply-input" rows="2" placeholder="Antwort (optional, an Nutzer:in sichtbar)">${escapeHtml(t.reply || "")}</textarea>
+      <div class="row" style="margin-top:8px;">
+        <button class="save-reply-btn">Antwort speichern</button>
+        <button class="secondary toggle-status-btn">${t.status === "open" ? "Als erledigt markieren" : "Wieder öffnen"}</button>
+      </div>
+    </div>
+  `
+    )
+    .join("");
+
+  el.querySelectorAll(".save-reply-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const card = btn.closest(".card");
+      const id = card.dataset.id;
+      const reply = card.querySelector(".reply-input").value;
+      await adminFetch(`/api/admin/support/${id}`, { method: "PATCH", body: JSON.stringify({ reply }) });
+      loadTickets();
+    };
+  });
+  el.querySelectorAll(".toggle-status-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const card = btn.closest(".card");
+      const id = card.dataset.id;
+      const current = card.querySelector(".badge").textContent.trim();
+      const newStatus = current === "offen" ? "closed" : "open";
+      await adminFetch(`/api/admin/support/${id}`, { method: "PATCH", body: JSON.stringify({ status: newStatus }) });
+      loadTickets();
+    };
+  });
+}
+
+async function loadAds() {
+  const ads = await adminFetch("/api/admin/ads");
+  const el = document.getElementById("ads");
+  if (ads.length === 0) {
+    el.innerHTML = `<p class="muted">Keine Anzeigen bisher.</p>`;
+    return;
+  }
+  el.innerHTML = ads
+    .map(
+      (a) => `
+    <div class="card" data-id="${a.id}">
+      <div class="row">
+        <div>
+          <strong>${escapeHtml(a.emoji || "")} ${escapeHtml(a.title)}</strong>
+          <span class="badge ${a.status}">${a.status}</span>
+          <div class="muted">${escapeHtml(a.advertiser_email || "Beispiel-Anzeige")} ${a.expires_at ? "· läuft ab " + new Date(a.expires_at).toLocaleDateString("de-DE") : ""}</div>
+        </div>
+      </div>
+      <p>${escapeHtml(a.body)} — Button: "${escapeHtml(a.cta_label)}"</p>
+      <div class="row">
+        ${a.status !== "active" ? '<button class="approve-btn">Freigeben</button>' : ""}
+        ${a.status !== "rejected" ? '<button class="secondary reject-btn">Ablehnen</button>' : ""}
+      </div>
+    </div>
+  `
+    )
+    .join("");
+
+  el.querySelectorAll(".approve-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const id = btn.closest(".card").dataset.id;
+      await adminFetch(`/api/admin/ads/${id}`, { method: "PATCH", body: JSON.stringify({ status: "active" }) });
+      loadAds();
+    };
+  });
+  el.querySelectorAll(".reject-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const id = btn.closest(".card").dataset.id;
+      await adminFetch(`/api/admin/ads/${id}`, { method: "PATCH", body: JSON.stringify({ status: "rejected" }) });
+      loadAds();
+    };
+  });
+}
+
+async function tryUnlock() {
+  try {
+    await adminFetch("/api/admin/support");
+    document.getElementById("key-gate").style.display = "none";
+    document.getElementById("admin-app").style.display = "block";
+    localStorage.setItem("tribe_admin_key", ADMIN_KEY);
+    loadTickets();
+    loadAds();
+  } catch (err) {
+    document.getElementById("key-error").textContent = "Schlüssel falsch oder Server nicht erreichbar.";
+  }
+}
+
+document.getElementById("unlock-btn").onclick = () => {
+  ADMIN_KEY = document.getElementById("admin-key-input").value.trim();
+  tryUnlock();
+};
+
+if (ADMIN_KEY) tryUnlock();
+</script>
+</body>
+</html>
