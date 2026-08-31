@@ -84,14 +84,26 @@ function renderAuth() {
   if (mode === "login") {
     form.innerHTML = `
       <div class="field"><label>E-Mail</label><input type="email" name="email" required /></div>
-      <div class="field"><label>Passwort</label><input type="password" name="password" required /></div>
+      <div class="field">
+        <label>Passwort</label>
+        <div class="password-wrap">
+          <input type="password" name="password" required />
+          <button type="button" class="toggle-password" tabindex="-1">👁️</button>
+        </div>
+      </div>
       <button class="btn-primary" type="submit">Einloggen</button>
     `;
   } else {
     form.innerHTML = `
       <div class="field"><label>Name</label><input type="text" name="name" required /></div>
       <div class="field"><label>E-Mail</label><input type="email" name="email" required /></div>
-      <div class="field"><label>Passwort</label><input type="password" name="password" minlength="6" required /></div>
+      <div class="field">
+        <label>Passwort</label>
+        <div class="password-wrap">
+          <input type="password" name="password" minlength="6" required />
+          <button type="button" class="toggle-password" tabindex="-1">👁️</button>
+        </div>
+      </div>
       <div class="field"><label>Geburtsdatum (du musst 18+ sein)</label><input type="date" name="birthdate" required /></div>
       <div class="field"><label>Stadt / Region / Land</label><input type="text" name="location" placeholder="z.B. Wien, Österreich" /></div>
       <div class="field">
@@ -118,6 +130,15 @@ function renderAuth() {
     form._identitySel = identitySel;
     form._seekingSel = seekingSel;
   }
+
+  form.querySelectorAll(".toggle-password").forEach((btn) => {
+    btn.onclick = () => {
+      const input = btn.previousElementSibling;
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      btn.textContent = showing ? "👁️" : "🙈";
+    };
+  });
 
   form.onsubmit = async (e) => {
     e.preventDefault();
