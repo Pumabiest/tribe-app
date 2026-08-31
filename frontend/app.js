@@ -423,6 +423,23 @@ function buildSwipeCard(person, isTop) {
   card.appendChild(likeBadge);
   card.appendChild(nopeBadge);
 
+  const menuBtn = document.createElement("button");
+  menuBtn.type = "button";
+  menuBtn.className = "card-menu-btn";
+  menuBtn.title = "Melden oder blockieren";
+  menuBtn.textContent = "⋯";
+  menuBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+  menuBtn.onclick = (e) => {
+    e.stopPropagation();
+    showReportBlockMenu(person, {
+      onBlocked: () => {
+        state.deck = state.deck.filter((p) => p.id !== person.id);
+        render();
+      },
+    });
+  };
+  card.appendChild(menuBtn);
+
   if (isTop) attachDrag(card, likeBadge, nopeBadge);
   return card;
 }
@@ -545,6 +562,102 @@ function showMatchToast(person) {
   };
 }
 
+// ================= MELDEN / BLOCKIEREN =================
+let reportReasonsCache = null;
+async function getReportReasons() {
+  if (reportReasonsCache) return reportReasonsCache;
+  try {
+    reportReasonsCache = await api("/api/report/reasons", { auth: false });
+  } catch {
+    reportReasonsCache = [
+      "Unangemessene Inhalte",
+      "Belästigung",
+      "Fake-Profil / Betrug",
+      "Minderjährig",
+      "Sonstiges",
+    ];
+  }
+  return reportReasonsCache;
+}
+
+async function showReportBlockMenu(person, { onBlocked } = {}) {
+  const reasons = await getReportReasons();
+  const overlay = document.createElement("div");
+  overlay.className = "sheet-overlay";
+  const close = () => overlay.remove();
+
+  function renderMenu() {
+    overlay.innerHTML = `
+      <div class="sheet-box">
+        <h3>${escapeHtml(person.name || "Nutzer:in")}</h3>
+        <button class="btn-secondary" id="report-btn">🚩 Melden</button>
+        <button class="btn-secondary" id="block-btn" style="color: var(--danger); border-color: var(--danger);">🚫 Blockieren</button>
+        <button class="btn-ghost" id="cancel-btn">Abbrechen</button>
+      </div>
+    `;
+    overlay.querySelector("#cancel-btn").onclick = close;
+    overlay.querySelector("#report-btn").onclick = renderReportForm;
+    overlay.querySelector("#block-btn").onclick = async () => {
+      if (!confirm(`${person.name || "Diese Person"} wirklich blockieren? Ihr seht euch danach gegenseitig nicht mehr.`)) return;
+      try {
+        await api(`/api/block/${person.id}`, { method: "POST" });
+        close();
+        if (onBlocked) onBlocked();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+  }
+
+  function renderReportForm() {
+    overlay.innerHTML = `
+      <div class="sheet-box">
+        <h3>${escapeHtml(person.name || "Nutzer:in")} melden</h3>
+        <div class="field">
+          <label>Grund</label>
+          <select id="report-reason">
+            ${reasons.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field">
+          <label>Zusätzliche Infos (optional)</label>
+          <textarea id="report-message" rows="3"></textarea>
+        </div>
+        <div id="report-error"></div>
+        <button class="btn-primary" id="submit-report-btn">Meldung senden</button>
+        <button class="btn-ghost" id="back-btn">Zurück</button>
+      </div>
+    `;
+    overlay.querySelector("#back-btn").onclick = renderMenu;
+    overlay.querySelector("#submit-report-btn").onclick = async () => {
+      const errEl = overlay.querySelector("#report-error");
+      errEl.innerHTML = "";
+      try {
+        await api("/api/report", {
+          method: "POST",
+          body: {
+            targetId: person.id,
+            reason: overlay.querySelector("#report-reason").value,
+            message: overlay.querySelector("#report-message").value.trim(),
+          },
+        });
+        overlay.innerHTML = `
+          <div class="sheet-box">
+            <p class="info-msg">Danke, deine Meldung wurde gesendet ✓</p>
+            <button class="btn-secondary" id="done-btn">Schließen</button>
+          </div>
+        `;
+        overlay.querySelector("#done-btn").onclick = close;
+      } catch (err) {
+        errEl.innerHTML = `<div class="error-msg">${escapeHtml(err.message)}</div>`;
+      }
+    };
+  }
+
+  renderMenu();
+  document.body.appendChild(overlay);
+}
+
 // ================= MATCHES =================
 async function loadMatches() {
   state.matches = await api("/api/matches");
@@ -640,6 +753,7 @@ function renderChat(view) {
         <button class="btn-ghost" id="back-btn">←</button>
         <div class="avatar" style="${other.photo_url ? `background-image:url(${other.photo_url})` : ""}">${other.photo_url ? "" : "🙂"}</div>
         <div class="name">${escapeHtml(other.name)}</div>
+        <button class="btn-ghost" id="chat-menu-btn" style="margin-left:auto; font-size:20px; padding:4px 10px;">⋯</button>
       </div>
       <div class="chat-messages" id="chat-messages"><div class="loading">Lädt…</div></div>
       <form class="chat-input" id="chat-form">
@@ -652,6 +766,15 @@ function renderChat(view) {
     clearInterval(chatPoll);
     state.tab = "matches";
     render();
+  };
+  view.querySelector("#chat-menu-btn").onclick = () => {
+    showReportBlockMenu(other, {
+      onBlocked: () => {
+        clearInterval(chatPoll);
+        state.tab = "matches";
+        render();
+      },
+    });
   };
   view.querySelector("#chat-form").onsubmit = async (e) => {
     e.preventDefault();
@@ -699,11 +822,15 @@ function renderProfile(view) {
     <button class="btn-primary" id="save-btn" style="margin-top:24px; width:100%;">Speichern</button>
     <div id="profile-msg" style="margin-top:12px;"></div>
 
+    <div class="section-title">Blockierte Nutzer:innen</div>
+    <div id="blocked-box"></div>
+
     <div class="section-title">Hilfe & Support</div>
     <div id="support-box"></div>
   `;
 
   renderPremiumBox(view.querySelector("#premium-box"));
+  renderBlockedBox(view.querySelector("#blocked-box"));
   renderSupportBox(view.querySelector("#support-box"));
 
   const identitySel = new Set(u.identity.map((t) => t.id));
@@ -820,6 +947,37 @@ async function renderPremiumBox(box) {
         alert(err.message);
       }
     };
+  }
+}
+
+async function renderBlockedBox(box) {
+  box.innerHTML = `<div class="loading">Lädt…</div>`;
+  try {
+    const blocked = await api("/api/blocked");
+    if (blocked.length === 0) {
+      box.innerHTML = `<p class="preview">Du hast niemanden blockiert.</p>`;
+      return;
+    }
+    box.innerHTML = blocked
+      .map(
+        (u) => `
+      <div class="match-row" data-id="${u.id}">
+        <div class="avatar" style="${u.photo_url ? `background-image:url(${u.photo_url})` : ""}">${u.photo_url ? "" : "🙂"}</div>
+        <div style="flex:1;"><div class="name">${escapeHtml(u.name)}</div></div>
+        <button class="btn-ghost unblock-btn">Entblocken</button>
+      </div>
+    `
+      )
+      .join("");
+    box.querySelectorAll(".unblock-btn").forEach((btn) => {
+      btn.onclick = async () => {
+        const id = btn.closest(".match-row").dataset.id;
+        await api(`/api/block/${id}`, { method: "DELETE" });
+        renderBlockedBox(box);
+      };
+    });
+  } catch {
+    box.innerHTML = `<p class="preview">Blockierte Nutzer konnten nicht geladen werden.</p>`;
   }
 }
 
