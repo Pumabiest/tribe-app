@@ -106,6 +106,19 @@ input:focus, textarea:focus, select:focus {
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field label { font-size: 13px; color: var(--text-dim); }
 
+.password-wrap { position: relative; }
+.password-wrap input { padding-right: 44px; }
+.password-wrap .toggle-password {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  padding: 6px 8px;
+  font-size: 16px;
+  color: var(--text-dim);
+}
+
 .btn-primary {
   background: var(--gradient);
   color: white;
