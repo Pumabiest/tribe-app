@@ -444,3 +444,47 @@ input:focus, textarea:focus, select:focus {
   color: var(--text-dim);
   padding: 40px;
 }
+
+/* ---------- Melden / Blockieren ---------- */
+.card-menu-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(11,11,18,0.55);
+  color: white;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,0.25);
+  z-index: 3;
+}
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(11,11,18,0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 24px;
+}
+.sheet-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 24px 20px;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sheet-box h3 {
+  text-align: center;
+  margin-bottom: 4px;
+}
