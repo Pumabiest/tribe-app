@@ -91,6 +91,24 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Report/Block system (required by Play Store policy for dating apps).
+CREATE TABLE IF NOT EXISTS reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reporter_id INTEGER NOT NULL,
+  reported_id INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  message TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS blocks (
+  blocker_id INTEGER NOT NULL,
+  blocked_id INTEGER NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (blocker_id, blocked_id)
+);
 `);
 
 // Gender identity, sexual orientation and style/subculture tags. These are
