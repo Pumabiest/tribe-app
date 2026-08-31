@@ -66,6 +66,11 @@ function renderAuth() {
     </div>
     <div id="auth-error"></div>
     <form id="auth-form" class="field" style="gap:14px;"></form>
+    <p style="text-align:center; font-size:12px; color:var(--text-dim); margin-top:8px;">
+      Mit der Registrierung akzeptierst du unsere
+      <a href="/privacy.html" target="_blank" style="color:var(--accent2);">Datenschutzerklärung</a>.
+      Du musst mindestens 18 Jahre alt sein.
+    </p>
   `;
 
   wrap.querySelectorAll(".tabs button").forEach((btn) => {
