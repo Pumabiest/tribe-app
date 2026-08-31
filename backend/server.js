@@ -243,6 +243,23 @@ function assertParticipant(matchId, userId) {
   return m;
 }
 
+// ---------- report / block ----------
+const REPORT_REASONS = [
+  "Unangemessene Inhalte",
+  "Belästigung",
+  "Fake-Profil / Betrug",
+  "Minderjährig",
+  "Sonstiges",
+];
+
+function isBlocked(a, b) {
+  return !!db
+    .prepare(
+      "SELECT 1 FROM blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)"
+    )
+    .get(a, b, b, a);
+}
+
 // ---------- route handlers ----------
 const routes = [];
 function route(method, pattern, handler) {
@@ -370,9 +387,11 @@ route("GET", "/api/discover", async (req, res) => {
     .prepare(
       `SELECT id, name, birthdate, bio, photo_url, location, seek_age_min, seek_age_max FROM users
        WHERE id != ?
-       AND id NOT IN (SELECT target_id FROM swipes WHERE swiper_id = ?)`
+       AND id NOT IN (SELECT target_id FROM swipes WHERE swiper_id = ?)
+       AND id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ?)
+       AND id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = ?)`
     )
-    .all(userId, userId);
+    .all(userId, userId, userId, userId);
 
   candidates = candidates
     .map((c) => ({
@@ -459,13 +478,15 @@ route("GET", "/api/matches", async (req, res) => {
     )
     .all(userId, userId, userId);
 
-  const result = rows.map((r) => {
-    const other = db.prepare("SELECT id, name, photo_url FROM users WHERE id = ?").get(r.other_id);
-    const lastMsg = db
-      .prepare("SELECT body, created_at FROM messages WHERE match_id = ? ORDER BY created_at DESC LIMIT 1")
-      .get(r.match_id);
-    return { matchId: r.match_id, createdAt: r.created_at, other, lastMessage: lastMsg || null };
-  });
+  const result = rows
+    .filter((r) => !isBlocked(userId, r.other_id))
+    .map((r) => {
+      const other = db.prepare("SELECT id, name, photo_url FROM users WHERE id = ?").get(r.other_id);
+      const lastMsg = db
+        .prepare("SELECT body, created_at FROM messages WHERE match_id = ? ORDER BY created_at DESC LIMIT 1")
+        .get(r.match_id);
+      return { matchId: r.match_id, createdAt: r.created_at, other, lastMessage: lastMsg || null };
+    });
   send(res, 200, result);
 });
 
@@ -481,13 +502,95 @@ route("POST", "/api/matches/:id/messages", async (req, res, params, body) => {
   const userId = getUserId(req);
   if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
   const matchId = Number(params.id);
-  if (!assertParticipant(matchId, userId)) return send(res, 403, { error: "Kein Zugriff" });
+  const m = assertParticipant(matchId, userId);
+  if (!m) return send(res, 403, { error: "Kein Zugriff" });
+  const otherId = m.user_a_id === userId ? m.user_b_id : m.user_a_id;
+  if (isBlocked(userId, otherId)) {
+    return send(res, 403, { error: "Nachricht kann nicht gesendet werden" });
+  }
   const text = (body.body || "").trim();
   if (!text) return send(res, 400, { error: "Nachricht darf nicht leer sein" });
   const info = db
     .prepare("INSERT INTO messages (match_id, sender_id, body) VALUES (?, ?, ?)")
     .run(matchId, userId, text);
   send(res, 200, db.prepare("SELECT * FROM messages WHERE id = ?").get(Number(info.lastInsertRowid)));
+});
+
+// ---------- report / block ----------
+route("GET", "/api/report/reasons", async (req, res) => {
+  send(res, 200, REPORT_REASONS);
+});
+
+route("POST", "/api/report", async (req, res, params, body) => {
+  const userId = getUserId(req);
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  const targetId = Number(body.targetId);
+  const reason = (body.reason || "").trim();
+  const message = (body.message || "").trim();
+  if (!targetId) return send(res, 400, { error: "targetId erforderlich" });
+  if (targetId === userId) return send(res, 400, { error: "Du kannst dich nicht selbst melden" });
+  if (!REPORT_REASONS.includes(reason)) return send(res, 400, { error: "Ungültiger Grund" });
+  const target = db.prepare("SELECT id FROM users WHERE id = ?").get(targetId);
+  if (!target) return send(res, 404, { error: "Nutzer nicht gefunden" });
+  db.prepare(
+    "INSERT INTO reports (reporter_id, reported_id, reason, message) VALUES (?, ?, ?, ?)"
+  ).run(userId, targetId, reason, message.slice(0, 2000));
+  send(res, 200, { ok: true });
+});
+
+route("POST", "/api/block/:userId", async (req, res, params) => {
+  const userId = getUserId(req);
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  const targetId = Number(params.userId);
+  if (!targetId || targetId === userId) return send(res, 400, { error: "Ungültiger Nutzer" });
+  const target = db.prepare("SELECT id FROM users WHERE id = ?").get(targetId);
+  if (!target) return send(res, 404, { error: "Nutzer nicht gefunden" });
+  db.prepare("INSERT OR IGNORE INTO blocks (blocker_id, blocked_id) VALUES (?, ?)").run(userId, targetId);
+  send(res, 200, { ok: true });
+});
+
+route("DELETE", "/api/block/:userId", async (req, res, params) => {
+  const userId = getUserId(req);
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  const targetId = Number(params.userId);
+  db.prepare("DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?").run(userId, targetId);
+  send(res, 200, { ok: true });
+});
+
+route("GET", "/api/blocked", async (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  const rows = db
+    .prepare(
+      `SELECT u.id, u.name, u.photo_url FROM blocks b JOIN users u ON u.id = b.blocked_id
+       WHERE b.blocker_id = ? ORDER BY b.created_at DESC`
+    )
+    .all(userId);
+  send(res, 200, rows);
+});
+
+route("GET", "/api/admin/reports", async (req, res) => {
+  if (!isAdmin(req)) return send(res, 401, { error: "Ungültiger Admin-Schlüssel" });
+  const rows = db
+    .prepare(
+      `SELECT r.*, ru.name as reporter_name, ru.email as reporter_email,
+              tu.name as reported_name, tu.email as reported_email
+       FROM reports r
+       JOIN users ru ON ru.id = r.reporter_id
+       JOIN users tu ON tu.id = r.reported_id
+       ORDER BY r.created_at DESC`
+    )
+    .all();
+  send(res, 200, rows);
+});
+
+route("PATCH", "/api/admin/reports/:id", async (req, res, params, body) => {
+  if (!isAdmin(req)) return send(res, 401, { error: "Ungültiger Admin-Schlüssel" });
+  const id = Number(params.id);
+  const current = db.prepare("SELECT * FROM reports WHERE id = ?").get(id);
+  if (!current) return send(res, 404, { error: "Meldung nicht gefunden" });
+  db.prepare("UPDATE reports SET status = ? WHERE id = ?").run(body.status ?? current.status, id);
+  send(res, 200, db.prepare("SELECT * FROM reports WHERE id = ?").get(id));
 });
 
 // ---------- support ----------
