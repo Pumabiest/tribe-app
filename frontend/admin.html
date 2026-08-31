@@ -35,6 +35,8 @@
 
 <div id="admin-app" style="display:none;">
   <h1>TRIBE Admin</h1>
+  <h2>Meldungen</h2>
+  <div id="reports"></div>
   <h2>Werbeanzeigen</h2>
   <div id="ads"></div>
   <h2>Support-Tickets</h2>
@@ -110,6 +112,46 @@ async function loadTickets() {
   });
 }
 
+async function loadReports() {
+  const reports = await adminFetch("/api/admin/reports");
+  const el = document.getElementById("reports");
+  if (reports.length === 0) {
+    el.innerHTML = `<p class="muted">Keine Meldungen bisher.</p>`;
+    return;
+  }
+  el.innerHTML = reports
+    .map(
+      (r) => `
+    <div class="card" data-id="${r.id}">
+      <div class="row">
+        <div>
+          <strong>${escapeHtml(r.reported_name)}</strong> gemeldet von ${escapeHtml(r.reporter_name)}
+          <span class="badge ${r.status}">${r.status === "open" ? "offen" : "geschlossen"}</span>
+          <div class="muted">${escapeHtml(r.reason)} · ${new Date(r.created_at).toLocaleString("de-DE")}</div>
+          <div class="muted">Gemeldet: ${escapeHtml(r.reported_email)} · Meldende:r: ${escapeHtml(r.reporter_email)}</div>
+        </div>
+      </div>
+      ${r.message ? `<p>${escapeHtml(r.message)}</p>` : ""}
+      <div class="row" style="margin-top:8px;">
+        <button class="secondary toggle-report-btn">${r.status === "open" ? "Als erledigt markieren" : "Wieder öffnen"}</button>
+      </div>
+    </div>
+  `
+    )
+    .join("");
+
+  el.querySelectorAll(".toggle-report-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const card = btn.closest(".card");
+      const id = card.dataset.id;
+      const current = card.querySelector(".badge").textContent.trim();
+      const newStatus = current === "offen" ? "closed" : "open";
+      await adminFetch(`/api/admin/reports/${id}`, { method: "PATCH", body: JSON.stringify({ status: newStatus }) });
+      loadReports();
+    };
+  });
+}
+
 async function loadAds() {
   const ads = await adminFetch("/api/admin/ads");
   const el = document.getElementById("ads");
@@ -160,6 +202,7 @@ async function tryUnlock() {
     document.getElementById("key-gate").style.display = "none";
     document.getElementById("admin-app").style.display = "block";
     localStorage.setItem("tribe_admin_key", ADMIN_KEY);
+    loadReports();
     loadTickets();
     loadAds();
   } catch (err) {
