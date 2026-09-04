@@ -5,6 +5,14 @@ const API = ""; // same origin as the backend serving this file
 const $app = document.getElementById("app");
 const PREMIUM_PRICE = 4.99;
 
+// Picked once per page load, so the tagline changes on every reload.
+const TAGLINES = [
+  "Finde Leute, die dasselbe suchen wie du.",
+  "Finde Leute aus deiner Bubble.",
+  "Finde Leute, die du sonst nirgends triffst.",
+];
+const TAGLINE = TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
+
 const state = {
   token: localStorage.getItem("tribe_token") || null,
   user: null,
@@ -58,7 +66,7 @@ function renderAuth() {
   wrap.innerHTML = `
     <div>
       <h1 class="brand">TRIBE</h1>
-      <p class="tagline">Finde Leute aus deiner Szene.</p>
+      <p class="tagline">${TAGLINE}</p>
     </div>
     <div class="beta-notice">
       🚧 TRIBE steckt noch in einer frühen Phase. Es kann zu Bugs oder Änderungen kommen, und wir bringen laufend Updates. Vorschläge und Feedback sind jederzeit herzlich willkommen unter
