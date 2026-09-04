@@ -881,12 +881,20 @@ async function handleStripeWebhook(req, res) {
     }
   } else if (event.type === "invoice.paid") {
     const invoice = event.data.object;
-    const periodEndUnix = invoice.lines?.data?.[0]?.period?.end;
+    // Stripe API 2025-03-31.basil+ moved the subscription reference off the
+    // invoice itself and onto invoice.parent.subscription_details.subscription
+    // (older API versions still have invoice.subscription directly).
+    const subscriptionId =
+      invoice.parent?.subscription_details?.subscription || invoice.subscription;
+    const periodEndUnix =
+      invoice.lines?.data?.[0]?.period?.end || invoice.period_end;
     const until = periodEndUnix ? new Date(periodEndUnix * 1000) : new Date(Date.now() + 31 * 86400000);
-    db.prepare("UPDATE users SET premium_until = ? WHERE stripe_subscription_id = ?").run(
-      until.toISOString(),
-      invoice.subscription
-    );
+    if (subscriptionId) {
+      db.prepare("UPDATE users SET premium_until = ? WHERE stripe_subscription_id = ?").run(
+        until.toISOString(),
+        subscriptionId
+      );
+    }
   } else if (event.type === "customer.subscription.deleted") {
     const sub = event.data.object;
     db.prepare("UPDATE users SET premium_until = NULL WHERE stripe_subscription_id = ?").run(sub.id);
