@@ -64,6 +64,9 @@ function renderAuth() {
       🚧 TRIBE steckt noch in einer frühen Phase. Es kann zu Bugs oder Änderungen kommen, und wir bringen laufend Updates. Vorschläge und Feedback sind jederzeit herzlich willkommen unter
       <a href="mailto:tribeapp.support@gmail.com" style="color:var(--accent2);">tribeapp.support@gmail.com</a>.
     </div>
+    <div class="beta-notice">
+      🌱 TRIBE ist gerade erst gestartet, deshalb sind aktuell noch nicht viele Leute angemeldet. Hol dir die App trotzdem schon jetzt und hab ein bisschen Geduld — je mehr Leute dabei sind, desto mehr Matches gibt's auch für dich.
+    </div>
     <div class="tabs">
       <button data-mode="login" class="${mode === "login" ? "active" : ""}">Login</button>
       <button data-mode="register" class="${mode === "register" ? "active" : ""}">Registrieren</button>
@@ -352,9 +355,10 @@ function renderDiscover(view) {
   if (state.deck.length === 0) {
     view.innerHTML = `
       <div class="empty-state">
-        <div class="emoji">🔍</div>
+        <div class="emoji">🌱</div>
         <h3>Keine neuen Leute gerade</h3>
         <p>Schau später nochmal vorbei oder passe deine Kategorien im Profil an.</p>
+        <p style="margin-top:10px;">TRIBE ist noch ganz neu, deshalb sind aktuell erst wenige Leute angemeldet. Bleib dran — je mehr Leute sich anmelden, desto mehr Matches gibt's auch für dich. Erzähl gern auch Freund:innen aus deiner Szene davon! 🌱</p>
       </div>
     `;
     const btn = document.createElement("button");
