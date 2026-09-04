@@ -60,6 +60,10 @@ function renderAuth() {
       <h1 class="brand">TRIBE</h1>
       <p class="tagline">Finde Leute aus deiner Szene.</p>
     </div>
+    <div class="beta-notice">
+      🚧 TRIBE steckt noch in einer frühen Phase. Es kann zu Bugs oder Änderungen kommen, und wir bringen laufend Updates. Vorschläge und Feedback sind jederzeit herzlich willkommen unter
+      <a href="mailto:tribeapp.support@gmail.com" style="color:var(--accent2);">tribeapp.support@gmail.com</a>.
+    </div>
     <div class="tabs">
       <button data-mode="login" class="${mode === "login" ? "active" : ""}">Login</button>
       <button data-mode="register" class="${mode === "register" ? "active" : ""}">Registrieren</button>
@@ -68,7 +72,9 @@ function renderAuth() {
     <form id="auth-form" class="field" style="gap:14px;"></form>
     <p style="text-align:center; font-size:12px; color:var(--text-dim); margin-top:8px;">
       Mit der Registrierung akzeptierst du unsere
-      <a href="/privacy.html" target="_blank" style="color:var(--accent2);">Datenschutzerklärung</a>       und unsere       <a href="/child-safety.html" target="_blank" style="color:var(--accent2);">Kinderschutzrichtlinie</a>.
+      <a href="/privacy.html" target="_blank" style="color:var(--accent2);">Datenschutzerklärung</a>
+      und unsere
+      <a href="/child-safety.html" target="_blank" style="color:var(--accent2);">Kinderschutzrichtlinie</a>.
       Du musst mindestens 18 Jahre alt sein.
     </p>
   `;
@@ -817,6 +823,10 @@ function renderChat(view) {
 function renderProfile(view) {
   const u = state.user;
   view.innerHTML = `
+    <div class="beta-notice">
+      🚧 TRIBE ist noch am Anfang — es kann zu Bugs oder Änderungen kommen, und es gibt laufend Updates. Vorschläge und Feedback sind jederzeit herzlich willkommen unter
+      <a href="mailto:tribeapp.support@gmail.com" style="color:var(--accent2);">tribeapp.support@gmail.com</a>.
+    </div>
     <div class="profile-photo-upload" id="photo-upload" style="${u.photo_url ? `background-image:url(${u.photo_url})` : ""}">
       ${u.photo_url ? "" : "📷"}
     </div>
