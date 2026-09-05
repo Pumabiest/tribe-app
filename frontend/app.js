@@ -938,6 +938,7 @@ function renderChat(view) {
 function renderProfile(view) {
   const u = state.user;
   view.innerHTML = `
+    ${renderInstallButton()}
     <div class="beta-notice">
       🚧 TRIBE ist noch am Anfang — es kann zu Bugs oder Änderungen kommen, und es gibt laufend Updates. Vorschläge und Feedback sind jederzeit herzlich willkommen unter
       <a href="mailto:tribeapp.support@gmail.com" style="color:var(--accent2);">tribeapp.support@gmail.com</a>.
@@ -982,6 +983,9 @@ function renderProfile(view) {
     <div class="section-title">Hilfe & Support</div>
     <div id="support-box"></div>
   `;
+
+  const installBtn = view.querySelector("#install-app-btn");
+  if (installBtn) installBtn.onclick = handleInstallClick;
 
   renderPremiumBox(view.querySelector("#premium-box"));
   renderBlockedBox(view.querySelector("#blocked-box"));
