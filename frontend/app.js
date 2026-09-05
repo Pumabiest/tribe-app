@@ -13,6 +13,44 @@ const TAGLINES = [
 ];
 const TAGLINE = TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
 
+// ---------- PWA install prompt ----------
+// Chrome/Android fire this before showing their own install UI; we capture
+// it so we can trigger the native install dialog from our own button.
+let deferredInstallPrompt = null;
+const isStandalone = () =>
+  window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const btn = document.getElementById("install-app-btn");
+  if (btn) btn.style.display = "";
+});
+
+async function handleInstallClick() {
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    const btn = document.getElementById("install-app-btn");
+    if (btn) btn.style.display = "none";
+  } else if (isIos()) {
+    alert(
+      "So installierst du TRIBE auf dem iPhone:\n\n1. Tippe unten auf das Teilen-Symbol (Quadrat mit Pfeil nach oben)\n2. Wähle „Zum Home-Bildschirm“\n3. Tippe auf „Hinzufügen“"
+    );
+  } else {
+    alert(
+      "Öffne das Menü deines Browsers (meist drei Punkte oben rechts) und wähle „App installieren“ oder „Zum Startbildschirm hinzufügen“."
+    );
+  }
+}
+
+function renderInstallButton() {
+  if (isStandalone()) return ""; // already installed, no need to show it
+  return `<button type="button" id="install-app-btn" class="btn-secondary" style="width:100%; margin-top:14px; ${deferredInstallPrompt || isIos() ? "" : "display:none;"}">📲 App installieren</button>`;
+}
+
 const state = {
   token: localStorage.getItem("tribe_token") || null,
   user: null,
@@ -67,6 +105,7 @@ function renderAuth() {
     <div>
       <h1 class="brand">TRIBE</h1>
       <p class="tagline">${TAGLINE}</p>
+      ${renderInstallButton()}
     </div>
     <div class="beta-notice">
       🚧 TRIBE steckt noch in einer frühen Phase. Es kann zu Bugs oder Änderungen kommen, und wir bringen laufend Updates. Vorschläge und Feedback sind jederzeit herzlich willkommen unter
@@ -93,6 +132,9 @@ function renderAuth() {
       <a href="/advertise.html" target="_blank" style="color:var(--accent2);">Werbung auf TRIBE schalten</a>
     </p>
   `;
+
+  const installBtn = wrap.querySelector("#install-app-btn");
+  if (installBtn) installBtn.onclick = handleInstallClick;
 
   wrap.querySelectorAll(".tabs button").forEach((btn) => {
     btn.onclick = () => {
@@ -894,7 +936,8 @@ function renderProfile(view) {
     <div class="profile-photo-upload" id="photo-upload" style="${u.photo_url ? `background-image:url(${u.photo_url})` : ""}">
       ${u.photo_url ? "" : "📷"}
     </div>
-    <input type="file" id="photo-input" accept="image/*" style="display:none" />
+    <input type="file" id="photo-input-camera" accept="image/*" capture="environment" style="display:none" />
+    <input type="file" id="photo-input-gallery" accept="image/*" style="display:none" />
 
     <div id="premium-box"></div>
 
@@ -907,6 +950,13 @@ function renderProfile(view) {
 
     <div class="section-title">Wonach du suchst</div>
     <div id="seeking-picker"></div>
+
+    <button type="button" id="open-to-new-btn" class="tag-chip${u.open_to_new ? " selected" : ""}" style="margin-top:8px; width:100%; text-align:left;">
+      🌈 Offen für Neues ${u.open_to_new ? "✓" : ""}
+    </button>
+    <p style="font-size:12px; color:var(--text-dim); margin:6px 0 0;">
+      Noch unsicher, was dir gefällt? Aktivier das, damit dir beim Entdecken auch Leute außerhalb deiner Auswahl oben gezeigt werden — zum Ausprobieren.
+    </p>
 
     <div class="section-title">Altersspanne, die du sehen willst</div>
     <div style="display:flex; gap:10px; align-items:center;">
@@ -933,9 +983,15 @@ function renderProfile(view) {
   renderGroupedTagPicker(view.querySelector("#identity-picker"), identitySel);
   renderGroupedTagPicker(view.querySelector("#seeking-picker"), seekingSel, { seekingMode: true });
 
-  view.querySelector("#photo-upload").onclick = () => view.querySelector("#photo-input").click();
-  view.querySelector("#photo-input").onchange = async (e) => {
-    const file = e.target.files[0];
+  let openToNew = !!u.open_to_new;
+  const openToNewBtn = view.querySelector("#open-to-new-btn");
+  openToNewBtn.onclick = () => {
+    openToNew = !openToNew;
+    openToNewBtn.classList.toggle("selected", openToNew);
+    openToNewBtn.innerHTML = `🌈 Offen für Neues ${openToNew ? "✓" : ""}`;
+  };
+
+  const handlePhotoFile = async (file) => {
     if (!file) return;
     const dataUrl = await fileToDataUrl(file);
     const msg = view.querySelector("#profile-msg");
@@ -946,6 +1002,30 @@ function renderProfile(view) {
     } catch (err) {
       msg.innerHTML = `<div class="error-msg">${escapeHtml(err.message)}</div>`;
     }
+  };
+  view.querySelector("#photo-input-camera").onchange = (e) => handlePhotoFile(e.target.files[0]);
+  view.querySelector("#photo-input-gallery").onchange = (e) => handlePhotoFile(e.target.files[0]);
+  view.querySelector("#photo-upload").onclick = () => {
+    const overlay = document.createElement("div");
+    overlay.className = "sheet-overlay";
+    overlay.innerHTML = `
+      <div class="sheet-box">
+        <h3>Profilfoto</h3>
+        <button class="btn-secondary" id="take-photo-btn">📷 Foto aufnehmen</button>
+        <button class="btn-secondary" id="choose-photo-btn">🖼️ Aus Galerie wählen</button>
+        <button class="btn-ghost" id="cancel-photo-btn">Abbrechen</button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#cancel-photo-btn").onclick = () => overlay.remove();
+    overlay.querySelector("#take-photo-btn").onclick = () => {
+      overlay.remove();
+      view.querySelector("#photo-input-camera").click();
+    };
+    overlay.querySelector("#choose-photo-btn").onclick = () => {
+      overlay.remove();
+      view.querySelector("#photo-input-gallery").click();
+    };
   };
 
   view.querySelector("#save-btn").onclick = async () => {
@@ -965,6 +1045,7 @@ function renderProfile(view) {
         body: {
           identity: [...identitySel],
           seeking: [...seekingSel],
+          openToNew,
           seekAgeMin: view.querySelector("#age-min-input").value,
           seekAgeMax: view.querySelector("#age-max-input").value,
         },
