@@ -66,7 +66,9 @@ const state = {
   categories: [],
   tab: "discover",
   deck: [],
-  lastSwiped: null,
+  // Stack of recent swipes (most recent last) so more than just the very
+  // last swipe can be undone — capped at MAX_SWIPE_HISTORY entries below.
+  swipeHistory: [],
   matches: [],
   matchSearch: "",
   activeChat: null, // {matchId, other}
@@ -487,6 +489,17 @@ function renderDiscover(view) {
         <p style="margin-top:10px;">TRIBE ist noch ganz neu, deshalb sind aktuell erst wenige Leute angemeldet. Bleib dran — je mehr Leute sich anmelden, desto mehr Matches gibt's auch für dich. Erzähl gern auch Freund:innen aus deiner Szene davon! 🌱</p>
       </div>
     `;
+    // Even with an empty deck, the last swipe(s) should still be undoable —
+    // this is exactly the case where the deck just ran out because of the
+    // swipe you want to take back.
+    if (state.swipeHistory.length > 0) {
+      const undoBtn = document.createElement("button");
+      undoBtn.className = "btn-secondary";
+      undoBtn.style.marginTop = "12px";
+      undoBtn.textContent = "↺ Letzten Swipe rückgängig machen";
+      undoBtn.onclick = () => undoSwipe();
+      view.appendChild(undoBtn);
+    }
     const btn = document.createElement("button");
     btn.className = "btn-secondary";
     btn.style.marginTop = "12px";
@@ -514,7 +527,7 @@ function renderDiscover(view) {
     const actions = document.createElement("div");
     actions.className = "swipe-actions";
     actions.innerHTML = `
-      <button class="undo-btn" id="undo-btn" title="Letzten Swipe rückgängig machen" ${state.lastSwiped ? "" : "disabled"}>↺</button>
+      <button class="undo-btn" id="undo-btn" title="Letzten Swipe rückgängig machen" ${state.swipeHistory.length > 0 ? "" : "disabled"}>↺</button>
       <button class="nope-btn" id="nope-btn">✕</button>
       <button class="like-btn" id="like-btn">♥</button>
     `;
@@ -657,6 +670,10 @@ function flyOut(card, dir) {
   card.style.transform = `translate(${dir * 600}px, -40px) rotate(${dir * 30}deg)`;
 }
 
+// Keep at most this many past swipes undoable, so the history array can't
+// grow without bound during a long swiping session.
+const MAX_SWIPE_HISTORY = 20;
+
 let swiping = false;
 async function swipeTop(liked) {
   if (swiping || state.deck.length === 0 || state.deck[0]._ad) return;
@@ -665,10 +682,13 @@ async function swipeTop(liked) {
   try {
     const res = await api("/api/swipe", { method: "POST", body: { targetId: person.id, liked } });
     if (res.match) {
-      state.lastSwiped = null; // can't undo a swipe that just created a match
+      // This particular swipe can't be undone (the backend rejects undoing a
+      // swipe that already turned into a match) — but earlier swipes in the
+      // history are still fine, so we leave swipeHistory untouched here.
       showMatchToast(person);
     } else {
-      state.lastSwiped = { person, liked };
+      state.swipeHistory.push({ person, liked });
+      if (state.swipeHistory.length > MAX_SWIPE_HISTORY) state.swipeHistory.shift();
       render();
     }
   } catch (err) {
@@ -678,15 +698,23 @@ async function swipeTop(liked) {
 }
 
 async function undoSwipe() {
-  if (!state.lastSwiped || swiping) return;
+  if (state.swipeHistory.length === 0 || swiping) return;
   swiping = true;
-  const { person } = state.lastSwiped;
+  // Peek (not pop) so a failed undo doesn't silently lose that history entry.
+  const { person } = state.swipeHistory[state.swipeHistory.length - 1];
   try {
     await api(`/api/swipe/${person.id}`, { method: "DELETE" });
+    state.swipeHistory.pop();
     state.deck.unshift(person);
-    state.lastSwiped = null;
   } catch (err) {
-    // most likely: a match already formed in the meantime, can't undo
+    // Most likely: a match already formed for this swipe in the meantime,
+    // so it can no longer be undone — drop it and tell the user why.
+    state.swipeHistory.pop();
+    alert(
+      err.message === "Ihr seid schon gematcht, das kann nicht rückgängig gemacht werden"
+        ? err.message
+        : "Rückgängig machen hat nicht geklappt: " + err.message
+    );
   }
   swiping = false;
   render();
@@ -997,6 +1025,15 @@ function renderProfile(view) {
 
     <div class="section-title">Hilfe & Support</div>
     <div id="support-box"></div>
+
+    <div class="section-title" style="color: var(--danger);">Account löschen</div>
+    <p style="font-size:12px; color:var(--text-dim); margin:0 0 10px;">
+      Löscht deinen Account, dein Profil, deine Matches, Chats und Swipes unwiderruflich. Ein laufendes
+      Premium-Abo wird dabei automatisch gekündigt.
+    </p>
+    <button type="button" id="delete-account-btn" class="btn-secondary" style="width:100%; color: var(--danger); border-color: var(--danger);">
+      🗑️ Account endgültig löschen
+    </button>
   `;
 
   const installBtn = view.querySelector("#install-app-btn");
@@ -1081,6 +1118,24 @@ function renderProfile(view) {
       state.user = updated;
       state.deck = []; // force refresh next time discover is opened
       msg.innerHTML = `<div class="info-msg">Gespeichert ✓</div>`;
+    } catch (err) {
+      msg.innerHTML = `<div class="error-msg">${escapeHtml(err.message)}</div>`;
+    }
+  };
+
+  view.querySelector("#delete-account-btn").onclick = async () => {
+    const typed = prompt(
+      'Das kann nicht rückgängig gemacht werden. Tippe zur Bestätigung "LÖSCHEN" (in Großbuchstaben) und bestätige.'
+    );
+    if (typed !== "LÖSCHEN") return;
+    const msg = view.querySelector("#profile-msg");
+    try {
+      await api("/api/me", { method: "DELETE" });
+      localStorage.removeItem("tribe_token");
+      state.token = null;
+      state.user = null;
+      alert("Dein Account wurde gelöscht.");
+      render();
     } catch (err) {
       msg.innerHTML = `<div class="error-msg">${escapeHtml(err.message)}</div>`;
     }
