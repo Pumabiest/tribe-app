@@ -125,7 +125,14 @@ function renderAuth() {
           <button type="button" class="toggle-password" tabindex="-1">👁️</button>
         </div>
       </div>
-      <div class="field"><label>Geburtsdatum (du musst 18+ sein)</label><input type="date" name="birthdate" required /></div>
+      <div class="field">
+        <label>Geburtsdatum (du musst 18+ sein)</label>
+        <div style="display:flex; gap:8px;">
+          <select name="birthDay" required style="flex:1;"><option value="">Tag</option></select>
+          <select name="birthMonth" required style="flex:1.4;"><option value="">Monat</option></select>
+          <select name="birthYear" required style="flex:1.2;"><option value="">Jahr</option></select>
+        </div>
+      </div>
       <div class="field"><label>Stadt / Region / Land</label><input type="text" name="location" placeholder="z.B. Wien, Österreich" /></div>
       <div class="field">
         <label>Wie präsentierst / identifizierst du dich? (mehrere möglich)</label>
@@ -151,6 +158,8 @@ function renderAuth() {
     form._identitySel = identitySel;
     form._seekingSel = seekingSel;
   }
+
+  populateBirthdateSelects(form);
 
   form.querySelectorAll(".toggle-password").forEach((btn) => {
     btn.onclick = () => {
@@ -182,7 +191,7 @@ function renderAuth() {
             name: fd.get("name"),
             email: fd.get("email"),
             password: fd.get("password"),
-            birthdate: fd.get("birthdate"),
+            birthdate: `${fd.get("birthYear")}-${String(fd.get("birthMonth")).padStart(2, "0")}-${String(fd.get("birthDay")).padStart(2, "0")}`,
             location: fd.get("location") || "",
             identity: [...form._identitySel],
             seeking: [...form._seekingSel],
@@ -203,6 +212,45 @@ function renderAuth() {
   };
 
   return wrap;
+}
+
+const MONTH_NAMES = [
+  "Januar", "Februar", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember",
+];
+
+// Fills the day/month/year birthdate dropdowns, if present in the form.
+// Using plain <select> elements instead of a native date input avoids the
+// painfully slow month-by-month calendar swipe some mobile browsers show.
+function populateBirthdateSelects(form) {
+  const daySel = form.querySelector('select[name="birthDay"]');
+  const monthSel = form.querySelector('select[name="birthMonth"]');
+  const yearSel = form.querySelector('select[name="birthYear"]');
+  if (!daySel || !monthSel || !yearSel) return;
+  if (daySel.dataset.filled) return; // avoid re-filling on re-render
+
+  for (let d = 1; d <= 31; d++) {
+    const opt = document.createElement("option");
+    opt.value = String(d);
+    opt.textContent = String(d);
+    daySel.appendChild(opt);
+  }
+  MONTH_NAMES.forEach((name, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i + 1);
+    opt.textContent = name;
+    monthSel.appendChild(opt);
+  });
+  const currentYear = new Date().getFullYear();
+  // Most recent eligible birth year (18+) first, so the common case
+  // (younger adults signing up) needs the least scrolling.
+  for (let y = currentYear - 18; y >= currentYear - 100; y--) {
+    const opt = document.createElement("option");
+    opt.value = String(y);
+    opt.textContent = String(y);
+    yearSel.appendChild(opt);
+  }
+  daySel.dataset.filled = "1";
 }
 
 const GROUP_LABELS = {
