@@ -97,6 +97,16 @@ async function stripeGet(endpoint) {
   return data;
 }
 
+async function stripeDelete(endpoint) {
+  const res = await fetch(`https://api.stripe.com/v1/${endpoint}`, {
+    method: "DELETE",
+    headers: { Authorization: "Basic " + Buffer.from(STRIPE_SECRET_KEY + ":").toString("base64") },
+  });
+  const data = await res.json();
+  if (!res.ok) throw Object.assign(new Error(data.error?.message || "Stripe-Fehler"), { status: 400 });
+  return data;
+}
+
 function verifyStripeSignature(rawBody, signatureHeader) {
   if (!signatureHeader) return false;
   const parts = Object.fromEntries(signatureHeader.split(",").map((p) => p.split("=")));
@@ -279,7 +289,44 @@ function clampAge(n, fallback) {
   return Math.min(99, Math.max(18, Math.round(v)));
 }
 
+// ---------- simple in-memory rate limiting ----------
+// Zero-dependency brute-force protection for login/register. Good enough for
+// a single server instance (which is what this app runs as) — it wouldn't
+// hold up against a distributed attack across many IPs, but that's a much
+// bigger problem than what this is meant to solve.
+const rateLimitBuckets = new Map(); // "login:1.2.3.4" -> { count, windowStart }
+
+function getClientIp(req) {
+  // Railway (and most hosts) sit behind a proxy, so the real client IP
+  // arrives via X-Forwarded-For rather than the raw socket address.
+  const fwd = req.headers["x-forwarded-for"];
+  if (fwd) return fwd.split(",")[0].trim();
+  return req.socket.remoteAddress || "unknown";
+}
+
+function isRateLimited(key, max, windowMs) {
+  const now = Date.now();
+  const bucket = rateLimitBuckets.get(key);
+  if (!bucket || now - bucket.windowStart > windowMs) {
+    rateLimitBuckets.set(key, { count: 1, windowStart: now });
+    return false;
+  }
+  bucket.count++;
+  return bucket.count > max;
+}
+
+// Forget old buckets periodically so this Map doesn't grow forever.
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of rateLimitBuckets) {
+    if (now - bucket.windowStart > 30 * 60 * 1000) rateLimitBuckets.delete(key);
+  }
+}, 10 * 60 * 1000).unref();
+
 route("POST", "/api/auth/register", async (req, res, params, body) => {
+  if (isRateLimited(`register:${getClientIp(req)}`, 8, 10 * 60 * 1000)) {
+    return send(res, 429, { error: "Zu viele Versuche. Bitte warte ein paar Minuten und versuch es nochmal." });
+  }
   const { email, password, name, birthdate, identity, seeking, location, seekAgeMin, seekAgeMax } = body;
   if (!email || !password || !name || !birthdate) {
     return send(res, 400, { error: "email, password, name, birthdate required" });
@@ -306,6 +353,9 @@ route("POST", "/api/auth/register", async (req, res, params, body) => {
 });
 
 route("POST", "/api/auth/login", async (req, res, params, body) => {
+  if (isRateLimited(`login:${getClientIp(req)}`, 10, 10 * 60 * 1000)) {
+    return send(res, 429, { error: "Zu viele Versuche. Bitte warte ein paar Minuten und versuch es nochmal." });
+  }
   const { email, password } = body;
   const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
   if (!user || !verifyPassword(password, user.password_hash)) {
@@ -323,6 +373,51 @@ route("GET", "/api/me", async (req, res) => {
   if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
   send(res, 200, publicUser(user));
+});
+
+// Self-service account deletion (GDPR right to erasure, Art. 17). Removes
+// everything that identifies this person — profile, tags, swipes, matches,
+// chat messages, blocks, and their uploaded photo — and cancels any active
+// Stripe subscription so a deleted account never gets billed again. Reports
+// and support tickets are intentionally left in place (they reference the
+// user only by an id that no longer resolves to anyone), since those may be
+// needed for a limited time for legal/moderation record-keeping.
+route("DELETE", "/api/me", async (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+  if (!user) return send(res, 404, { error: "Nutzer nicht gefunden" });
+
+  if (STRIPE_ENABLED && user.stripe_subscription_id) {
+    try {
+      await stripeDelete(`subscriptions/${user.stripe_subscription_id}`);
+    } catch (e) {
+      // Don't block account deletion on a Stripe hiccup — worst case the
+      // subscription needs to be cancelled manually in the Stripe dashboard.
+      console.error("Konnte Stripe-Abo beim Löschen nicht kündigen:", e.message);
+    }
+  }
+
+  const matchIds = db
+    .prepare("SELECT id FROM matches WHERE user_a_id = ? OR user_b_id = ?")
+    .all(userId, userId)
+    .map((m) => m.id);
+  for (const matchId of matchIds) {
+    db.prepare("DELETE FROM messages WHERE match_id = ?").run(matchId);
+  }
+  db.prepare("DELETE FROM matches WHERE user_a_id = ? OR user_b_id = ?").run(userId, userId);
+  db.prepare("DELETE FROM swipes WHERE swiper_id = ? OR target_id = ?").run(userId, userId);
+  db.prepare("DELETE FROM user_identity_tags WHERE user_id = ?").run(userId);
+  db.prepare("DELETE FROM user_seeking_tags WHERE user_id = ?").run(userId);
+  db.prepare("DELETE FROM blocks WHERE blocker_id = ? OR blocked_id = ?").run(userId, userId);
+
+  if (user.photo_url && user.photo_url.startsWith("/uploads/")) {
+    const filePath = path.join(UPLOAD_DIR, user.photo_url.replace("/uploads/", ""));
+    fs.unlink(filePath, () => {}); // best effort — a leftover file isn't worth failing the request over
+  }
+
+  db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+  send(res, 200, { ok: true });
 });
 
 route("PUT", "/api/me", async (req, res, params, body) => {
