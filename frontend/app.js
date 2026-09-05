@@ -88,6 +88,10 @@ function renderAuth() {
       <a href="/child-safety.html" target="_blank" style="color:var(--accent2);">Kinderschutzrichtlinie</a>.
       Du musst mindestens 18 Jahre alt sein.
     </p>
+    <p style="text-align:center; font-size:12px; color:var(--text-dim); margin-top:4px;">
+      Du willst deine Marke bei uns bewerben?
+      <a href="/advertise.html" target="_blank" style="color:var(--accent2);">Werbung auf TRIBE schalten</a>
+    </p>
   `;
 
   wrap.querySelectorAll(".tabs button").forEach((btn) => {
