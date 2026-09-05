@@ -21,11 +21,16 @@ const isStandalone = () =>
   window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
 const isIos = () => /iphone|ipad|ipod/i.test(window.navigator.userAgent);
 
+// In-app browsers (WhatsApp, Instagram, Facebook, TikTok, Messenger, Line, ...)
+// are WebViews that never fire beforeinstallprompt and block real "Add to
+// Home Screen" support — the only fix is opening the link in the real
+// browser (Chrome/Safari) first.
+const isInAppBrowser = () =>
+  /FBAN|FBAV|Instagram|Line\/|WhatsApp|TikTok|MicroMessenger|Snapchat/i.test(window.navigator.userAgent);
+
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   deferredInstallPrompt = e;
-  const btn = document.getElementById("install-app-btn");
-  if (btn) btn.style.display = "";
 });
 
 async function handleInstallClick() {
@@ -35,6 +40,10 @@ async function handleInstallClick() {
     deferredInstallPrompt = null;
     const btn = document.getElementById("install-app-btn");
     if (btn) btn.style.display = "none";
+  } else if (isInAppBrowser()) {
+    alert(
+      "Du hast den Link in einem In-App-Browser geöffnet (z.B. WhatsApp/Instagram) — von dort geht die Installation leider nicht.\n\nTippe oben rechts auf „⋮“ bzw. die drei Punkte und wähle „Im Browser öffnen“ (Chrome/Safari). Danach kannst du TRIBE ganz normal installieren."
+    );
   } else if (isIos()) {
     alert(
       "So installierst du TRIBE auf dem iPhone:\n\n1. Tippe unten auf das Teilen-Symbol (Quadrat mit Pfeil nach oben)\n2. Wähle „Zum Home-Bildschirm“\n3. Tippe auf „Hinzufügen“"
@@ -48,7 +57,7 @@ async function handleInstallClick() {
 
 function renderInstallButton() {
   if (isStandalone()) return ""; // already installed, no need to show it
-  return `<button type="button" id="install-app-btn" class="btn-secondary" style="width:100%; margin-top:14px; ${deferredInstallPrompt || isIos() ? "" : "display:none;"}">📲 App installieren</button>`;
+  return `<button type="button" id="install-app-btn" class="btn-secondary" style="width:100%; margin-top:14px;">📲 App installieren</button>`;
 }
 
 const state = {
