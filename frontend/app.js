@@ -368,7 +368,20 @@ function renderAppShell() {
 
   const topbar = document.createElement("div");
   topbar.className = "topbar";
-  topbar.innerHTML = `<span class="brand">TRIBE</span>`;
+  topbar.style.display = "flex";
+  topbar.style.alignItems = "center";
+  topbar.style.justifyContent = "space-between";
+  topbar.style.gap = "10px";
+  topbar.innerHTML = `
+    <span class="brand">TRIBE</span>
+    <div style="display:flex; align-items:center; gap:10px;">
+      ${
+        isStandalone()
+          ? ""
+          : `<button type="button" id="topbar-install-btn" class="btn-ghost" title="App installieren" style="font-size:20px; line-height:1; padding:4px 8px;">📲</button>`
+      }
+    </div>
+  `;
   const logoutBtn = document.createElement("button");
   logoutBtn.className = "btn-ghost";
   logoutBtn.textContent = "Abmelden";
@@ -378,7 +391,9 @@ function renderAppShell() {
     state.user = null;
     render();
   };
-  topbar.appendChild(logoutBtn);
+  topbar.querySelector("div").appendChild(logoutBtn);
+  const topbarInstallBtn = topbar.querySelector("#topbar-install-btn");
+  if (topbarInstallBtn) topbarInstallBtn.onclick = handleInstallClick;
   wrap.appendChild(topbar);
 
   const view = document.createElement("div");
