@@ -208,7 +208,14 @@ function getUserId(req) {
   const header = req.headers["authorization"] || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   const payload = verifyToken(token);
-  return payload ? payload.id : null;
+  if (!payload) return null;
+  // A banned account's existing token stops working on its very next
+  // request everywhere in the app (every authed route calls getUserId) —
+  // same as if they'd never been logged in. This one check covers all
+  // endpoints at once instead of having to touch every route individually.
+  const row = db.prepare("SELECT banned FROM users WHERE id = ?").get(payload.id);
+  if (!row || row.banned) return null;
+  return payload.id;
 }
 
 // ---------- data helpers ----------
@@ -360,6 +367,9 @@ route("POST", "/api/auth/login", async (req, res, params, body) => {
   const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
   if (!user || !verifyPassword(password, user.password_hash)) {
     return send(res, 401, { error: "E-Mail oder Passwort falsch", code: "INVALID_CREDENTIALS" });
+  }
+  if (user.banned) {
+    return send(res, 403, { error: "Dieser Account wurde gesperrt", code: "ACCOUNT_BANNED" });
   }
   send(res, 200, { token: signToken({ id: user.id }), user: publicUser(user) });
 });
@@ -700,6 +710,99 @@ route("PATCH", "/api/admin/reports/:id", async (req, res, params, body) => {
   if (!current) return send(res, 404, { error: "Meldung nicht gefunden" });
   db.prepare("UPDATE reports SET status = ? WHERE id = ?").run(body.status ?? current.status, id);
   send(res, 200, db.prepare("SELECT * FROM reports WHERE id = ?").get(id));
+});
+
+// ---------- admin: users (ban / premium) ----------
+// A ban is enforced everywhere at once via getUserId(): a banned user's
+// existing login token stops working on their very next request, and they
+// can no longer log back in (see /api/auth/login above). Banning also
+// immediately cancels any live Stripe subscription and wipes premium_until —
+// see privacy.html section 11 ("Kontosperrung bei Verstößen") for why:
+// violating the rules forfeits any paid or gifted Premium time, with no
+// refund or replacement owed.
+route("GET", "/api/admin/users", async (req, res) => {
+  if (!isAdmin(req)) return send(res, 401, { error: "Ungültiger Admin-Schlüssel" });
+  const q = (new URL(req.url, "http://x").searchParams.get("q") || "").trim().toLowerCase();
+  let rows = db
+    .prepare(
+      "SELECT id, email, name, banned, ban_reason, banned_at, premium_until, stripe_subscription_id, created_at FROM users ORDER BY created_at DESC"
+    )
+    .all();
+  if (q) {
+    rows = rows.filter(
+      (u) =>
+        u.email.toLowerCase().includes(q) ||
+        u.name.toLowerCase().includes(q) ||
+        String(u.id) === q
+    );
+  }
+  send(
+    res,
+    200,
+    rows.map((u) => ({ ...u, premium: isPremium(u) }))
+  );
+});
+
+route("POST", "/api/admin/users/:id/ban", async (req, res, params, body) => {
+  if (!isAdmin(req)) return send(res, 401, { error: "Ungültiger Admin-Schlüssel" });
+  const id = Number(params.id);
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
+  if (!user) return send(res, 404, { error: "Nutzer nicht gefunden" });
+  const reason = (body?.reason || "").trim().slice(0, 500);
+
+  if (STRIPE_ENABLED && user.stripe_subscription_id) {
+    try {
+      await stripeDelete(`subscriptions/${user.stripe_subscription_id}`);
+    } catch (e) {
+      // Don't block the ban on a Stripe hiccup — worst case the subscription
+      // needs to be cancelled manually in the Stripe dashboard.
+      console.error("Konnte Stripe-Abo beim Bann nicht kündigen:", e.message);
+    }
+  }
+  db.prepare(
+    "UPDATE users SET banned = 1, banned_at = CURRENT_TIMESTAMP, ban_reason = ?, premium_until = NULL, stripe_subscription_id = NULL WHERE id = ?"
+  ).run(reason, id);
+  send(res, 200, { ok: true });
+});
+
+route("POST", "/api/admin/users/:id/unban", async (req, res, params) => {
+  if (!isAdmin(req)) return send(res, 401, { error: "Ungültiger Admin-Schlüssel" });
+  const id = Number(params.id);
+  const user = db.prepare("SELECT id FROM users WHERE id = ?").get(id);
+  if (!user) return send(res, 404, { error: "Nutzer nicht gefunden" });
+  db.prepare("UPDATE users SET banned = 0, banned_at = NULL, ban_reason = NULL WHERE id = ?").run(id);
+  send(res, 200, { ok: true });
+});
+
+// Grants Premium for free (no Stripe charge). Extends from the current
+// premium_until if that user already has active Premium, otherwise starts
+// from now.
+route("POST", "/api/admin/users/:id/grant-premium", async (req, res, params, body) => {
+  if (!isAdmin(req)) return send(res, 401, { error: "Ungültiger Admin-Schlüssel" });
+  const id = Number(params.id);
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
+  if (!user) return send(res, 404, { error: "Nutzer nicht gefunden" });
+  const days = Number(body?.days) > 0 ? Number(body.days) : PREMIUM_DAYS;
+  const base = isPremium(user) ? new Date(user.premium_until) : new Date();
+  const until = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
+  db.prepare("UPDATE users SET premium_until = ? WHERE id = ?").run(until.toISOString(), id);
+  send(res, 200, { ok: true, premium_until: until.toISOString() });
+});
+
+route("POST", "/api/admin/users/:id/revoke-premium", async (req, res, params) => {
+  if (!isAdmin(req)) return send(res, 401, { error: "Ungültiger Admin-Schlüssel" });
+  const id = Number(params.id);
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
+  if (!user) return send(res, 404, { error: "Nutzer nicht gefunden" });
+  if (STRIPE_ENABLED && user.stripe_subscription_id) {
+    try {
+      await stripeDelete(`subscriptions/${user.stripe_subscription_id}`);
+    } catch (e) {
+      console.error("Konnte Stripe-Abo beim Entziehen nicht kündigen:", e.message);
+    }
+  }
+  db.prepare("UPDATE users SET premium_until = NULL, stripe_subscription_id = NULL WHERE id = ?").run(id);
+  send(res, 200, { ok: true });
 });
 
 // ---------- support ----------
