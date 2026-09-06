@@ -153,6 +153,13 @@ for (const stmt of [
   // seeking-tag filter (age filter still applies) so people who aren't sure
   // yet what they're into can browse more broadly and figure it out.
   "ALTER TABLE users ADD COLUMN open_to_new INTEGER NOT NULL DEFAULT 0",
+  // Ban system: a banned account is logged out everywhere immediately (see
+  // getUserId() in server.js) and can no longer log back in. Banning always
+  // clears any active/gifted Premium and cancels a live Stripe subscription —
+  // see privacy.html section 11 ("Kontosperrung bei Verstößen").
+  "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE users ADD COLUMN banned_at TEXT",
+  "ALTER TABLE users ADD COLUMN ban_reason TEXT",
 ]) {
   try {
     db.exec(stmt);
