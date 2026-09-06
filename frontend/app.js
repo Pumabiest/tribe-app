@@ -506,6 +506,7 @@ const ERROR_STRINGS = {
     UNDERAGE: "Du musst mindestens 18 Jahre alt sein.",
     EMAIL_TAKEN: "E-Mail bereits registriert.",
     INVALID_CREDENTIALS: "E-Mail oder Passwort falsch.",
+    ACCOUNT_BANNED: "Dieser Account wurde gesperrt.",
     USER_NOT_FOUND: "Nutzer nicht gefunden.",
     INVALID_IMAGE: "Ungültiges Bildformat.",
     TARGET_ID_REQUIRED: "Ungültige Anfrage.",
@@ -530,6 +531,7 @@ const ERROR_STRINGS = {
     UNDERAGE: "You must be at least 18 years old.",
     EMAIL_TAKEN: "Email already registered.",
     INVALID_CREDENTIALS: "Email or password incorrect.",
+    ACCOUNT_BANNED: "This account has been suspended.",
     USER_NOT_FOUND: "User not found.",
     INVALID_IMAGE: "Invalid image format.",
     TARGET_ID_REQUIRED: "Invalid request.",
@@ -554,6 +556,7 @@ const ERROR_STRINGS = {
     UNDERAGE: "Você precisa ter pelo menos 18 anos.",
     EMAIL_TAKEN: "Email já cadastrado.",
     INVALID_CREDENTIALS: "Email ou senha incorretos.",
+    ACCOUNT_BANNED: "Esta conta foi suspensa.",
     USER_NOT_FOUND: "Usuário não encontrado.",
     INVALID_IMAGE: "Formato de imagem inválido.",
     TARGET_ID_REQUIRED: "Solicitação inválida.",
@@ -1080,7 +1083,7 @@ function interleaveAds(deck, ad) {
   const out = [];
   deck.forEach((p, i) => {
     out.push(p);
-    if ((i + 1) % 6 === 0) out.push({ _ad: true, ...ad, id: `ad-${i}-${Math.random()}` });
+    if ((i + 1) % 20 === 0) out.push({ _ad: true, ...ad, id: `ad-${i}-${Math.random()}` });
   });
   return out;
 }
