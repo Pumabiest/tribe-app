@@ -123,9 +123,57 @@ function fmtDate(iso) {
   return iso ? new Date(iso).toLocaleDateString("de-DE") : "";
 }
 
+// window.prompt()/confirm() are unreliable — some mobile browsers and
+// embedded/in-app browser views silently block or throw on them, which made
+// the ban/premium buttons appear to do nothing. This is a self-built inline
+// dialog (plain DOM, no native browser dialogs) that works everywhere.
+function showModal({ title, message, withInput = false, inputDefault = "", confirmLabel = "Bestätigen", danger = false }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.style.cssText =
+      "position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:1000; padding:20px; box-sizing:border-box;";
+    const box = document.createElement("div");
+    box.style.cssText =
+      "background:#191926; border:1px solid #2b2b3d; border-radius:16px; padding:22px; max-width:360px; width:100%;";
+    box.innerHTML = `
+      <h3 style="margin:0 0 10px; font-size:16px; color:#f2f0f7;">${title}</h3>
+      ${message ? `<p style="color:#a29fb5; font-size:14px; margin:0 0 14px; line-height:1.5;">${message}</p>` : ""}
+      ${withInput ? `<input id="modal-input" type="text" value="${inputDefault}" style="margin-bottom:14px;" />` : ""}
+      <div style="display:flex; gap:10px;">
+        <button type="button" id="modal-cancel" class="secondary" style="flex:1; margin-top:0;">Abbrechen</button>
+        <button type="button" id="modal-confirm" class="${danger ? "btn-danger" : ""}" style="flex:1; margin-top:0;">${confirmLabel}</button>
+      </div>
+    `;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    const input = box.querySelector("#modal-input");
+    if (input) {
+      input.focus();
+      input.select();
+    }
+    const close = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    box.querySelector("#modal-cancel").onclick = () => close(null);
+    box.querySelector("#modal-confirm").onclick = () => close(withInput ? input.value : true);
+    overlay.onclick = (e) => {
+      if (e.target === overlay) close(null);
+    };
+  });
+}
+
 async function banUser(id) {
-  const reason = prompt("Grund für die Sperrung (wird nur intern gespeichert):", "") || "";
-  if (!confirm("Diesen Account wirklich sperren? Ein aktives oder geschenktes Premium/Abo wird dabei sofort und ohne Erstattung beendet.")) return;
+  const reason = await showModal({
+    title: "Account sperren",
+    message:
+      "Ein aktives oder geschenktes Premium/Abo wird dabei sofort und ohne Erstattung beendet. Grund eintragen (wird nur intern gespeichert, optional):",
+    withInput: true,
+    inputDefault: "",
+    confirmLabel: "Sperren",
+    danger: true,
+  });
+  if (reason === null) return;
   await adminFetch(`/api/admin/users/${id}/ban`, { method: "POST", body: JSON.stringify({ reason }) });
   loadUsers();
   loadReports();
@@ -137,14 +185,28 @@ async function unbanUser(id) {
 }
 
 async function grantPremium(id) {
-  const days = Number(prompt("Premium schenken — für wie viele Tage?", "30"));
+  const daysStr = await showModal({
+    title: "Premium schenken",
+    message: "Für wie viele Tage?",
+    withInput: true,
+    inputDefault: "30",
+    confirmLabel: "Schenken",
+  });
+  if (daysStr === null) return;
+  const days = Number(daysStr);
   if (!days || days <= 0) return;
   await adminFetch(`/api/admin/users/${id}/grant-premium`, { method: "POST", body: JSON.stringify({ days }) });
   loadUsers();
 }
 
 async function revokePremium(id) {
-  if (!confirm("Premium diesem Nutzer entziehen?")) return;
+  const ok = await showModal({
+    title: "Premium entziehen",
+    message: "Diesem Nutzer das aktive Premium entziehen?",
+    confirmLabel: "Entziehen",
+    danger: true,
+  });
+  if (!ok) return;
   await adminFetch(`/api/admin/users/${id}/revoke-premium`, { method: "POST" });
   loadUsers();
 }
