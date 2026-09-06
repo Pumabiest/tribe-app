@@ -325,17 +325,17 @@ setInterval(() => {
 
 route("POST", "/api/auth/register", async (req, res, params, body) => {
   if (isRateLimited(`register:${getClientIp(req)}`, 8, 10 * 60 * 1000)) {
-    return send(res, 429, { error: "Zu viele Versuche. Bitte warte ein paar Minuten und versuch es nochmal." });
+    return send(res, 429, { error: "Zu viele Versuche. Bitte warte ein paar Minuten und versuch es nochmal.", code: "RATE_LIMITED" });
   }
   const { email, password, name, birthdate, identity, seeking, location, seekAgeMin, seekAgeMax } = body;
   if (!email || !password || !name || !birthdate) {
-    return send(res, 400, { error: "email, password, name, birthdate required" });
+    return send(res, 400, { error: "email, password, name, birthdate required", code: "MISSING_FIELDS" });
   }
   if (age(birthdate) < 18) {
-    return send(res, 400, { error: "Du musst mindestens 18 Jahre alt sein" });
+    return send(res, 400, { error: "Du musst mindestens 18 Jahre alt sein", code: "UNDERAGE" });
   }
   if (db.prepare("SELECT id FROM users WHERE email = ?").get(email)) {
-    return send(res, 409, { error: "E-Mail bereits registriert" });
+    return send(res, 409, { error: "E-Mail bereits registriert", code: "EMAIL_TAKEN" });
   }
   const password_hash = hashPassword(password);
   const ageMin = clampAge(seekAgeMin, 18);
@@ -354,12 +354,12 @@ route("POST", "/api/auth/register", async (req, res, params, body) => {
 
 route("POST", "/api/auth/login", async (req, res, params, body) => {
   if (isRateLimited(`login:${getClientIp(req)}`, 10, 10 * 60 * 1000)) {
-    return send(res, 429, { error: "Zu viele Versuche. Bitte warte ein paar Minuten und versuch es nochmal." });
+    return send(res, 429, { error: "Zu viele Versuche. Bitte warte ein paar Minuten und versuch es nochmal.", code: "RATE_LIMITED" });
   }
   const { email, password } = body;
   const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
   if (!user || !verifyPassword(password, user.password_hash)) {
-    return send(res, 401, { error: "E-Mail oder Passwort falsch" });
+    return send(res, 401, { error: "E-Mail oder Passwort falsch", code: "INVALID_CREDENTIALS" });
   }
   send(res, 200, { token: signToken({ id: user.id }), user: publicUser(user) });
 });
@@ -370,7 +370,7 @@ route("GET", "/api/categories", async (req, res) => {
 
 route("GET", "/api/me", async (req, res) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
   send(res, 200, publicUser(user));
 });
@@ -384,9 +384,9 @@ route("GET", "/api/me", async (req, res) => {
 // needed for a limited time for legal/moderation record-keeping.
 route("DELETE", "/api/me", async (req, res) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
-  if (!user) return send(res, 404, { error: "Nutzer nicht gefunden" });
+  if (!user) return send(res, 404, { error: "Nutzer nicht gefunden", code: "USER_NOT_FOUND" });
 
   if (STRIPE_ENABLED && user.stripe_subscription_id) {
     try {
@@ -422,7 +422,7 @@ route("DELETE", "/api/me", async (req, res) => {
 
 route("PUT", "/api/me", async (req, res, params, body) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const { name, bio, location } = body;
   const current = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
   db.prepare("UPDATE users SET name = ?, bio = ?, location = ? WHERE id = ?").run(
@@ -436,7 +436,7 @@ route("PUT", "/api/me", async (req, res, params, body) => {
 
 route("PUT", "/api/me/tags", async (req, res, params, body) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const { identity, seeking, seekAgeMin, seekAgeMax, openToNew } = body;
   if (identity !== undefined) setTags(userId, "user_identity_tags", identity);
   if (seeking !== undefined) setTags(userId, "user_seeking_tags", seeking);
@@ -458,10 +458,10 @@ route("PUT", "/api/me/tags", async (req, res, params, body) => {
 
 route("POST", "/api/me/photo", async (req, res, params, body) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const { dataUrl } = body;
   const match = /^data:(image\/(png|jpeg|jpg|webp|gif));base64,(.+)$/.exec(dataUrl || "");
-  if (!match) return send(res, 400, { error: "Ungültiges Bildformat" });
+  if (!match) return send(res, 400, { error: "Ungültiges Bildformat", code: "INVALID_IMAGE" });
   const ext = match[2] === "jpeg" ? "jpg" : match[2];
   const buf = Buffer.from(match[3], "base64");
   const filename = `user_${userId}_${Date.now()}.${ext}`;
@@ -473,7 +473,7 @@ route("POST", "/api/me/photo", async (req, res, params, body) => {
 
 route("GET", "/api/discover", async (req, res) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
 
   const me = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
   const myAge = age(me.birthdate);
@@ -527,12 +527,12 @@ route("GET", "/api/discover", async (req, res) => {
 
 route("POST", "/api/swipe", async (req, res, params, body) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const targetId = Number(body.targetId);
   const liked = !!body.liked;
-  if (!targetId) return send(res, 400, { error: "targetId erforderlich" });
+  if (!targetId) return send(res, 400, { error: "targetId erforderlich", code: "TARGET_ID_REQUIRED" });
   const target = db.prepare("SELECT id FROM users WHERE id = ?").get(targetId);
-  if (!target) return send(res, 404, { error: "Nutzer nicht gefunden" });
+  if (!target) return send(res, 404, { error: "Nutzer nicht gefunden", code: "USER_NOT_FOUND" });
 
   db.prepare(
     "INSERT OR REPLACE INTO swipes (swiper_id, target_id, liked) VALUES (?, ?, ?)"
@@ -559,14 +559,14 @@ route("POST", "/api/swipe", async (req, res, params, body) => {
 // into a match (protects existing matches/conversations from being wiped).
 route("DELETE", "/api/swipe/:targetId", async (req, res, params) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const targetId = Number(params.targetId);
 
   const a = Math.min(userId, targetId);
   const b = Math.max(userId, targetId);
   const existingMatch = db.prepare("SELECT id FROM matches WHERE user_a_id = ? AND user_b_id = ?").get(a, b);
   if (existingMatch) {
-    return send(res, 409, { error: "Ihr seid schon gematcht, das kann nicht rückgängig gemacht werden" });
+    return send(res, 409, { error: "Ihr seid schon gematcht, das kann nicht rückgängig gemacht werden", code: "ALREADY_MATCHED" });
   }
 
   db.prepare("DELETE FROM swipes WHERE swiper_id = ? AND target_id = ?").run(userId, targetId);
@@ -575,7 +575,7 @@ route("DELETE", "/api/swipe/:targetId", async (req, res, params) => {
 
 route("GET", "/api/matches", async (req, res) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
 
   const rows = db
     .prepare(
@@ -601,24 +601,24 @@ route("GET", "/api/matches", async (req, res) => {
 
 route("GET", "/api/matches/:id/messages", async (req, res, params) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const matchId = Number(params.id);
-  if (!assertParticipant(matchId, userId)) return send(res, 403, { error: "Kein Zugriff" });
+  if (!assertParticipant(matchId, userId)) return send(res, 403, { error: "Kein Zugriff", code: "NO_ACCESS" });
   send(res, 200, db.prepare("SELECT * FROM messages WHERE match_id = ? ORDER BY created_at ASC").all(matchId));
 });
 
 route("POST", "/api/matches/:id/messages", async (req, res, params, body) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const matchId = Number(params.id);
   const m = assertParticipant(matchId, userId);
-  if (!m) return send(res, 403, { error: "Kein Zugriff" });
+  if (!m) return send(res, 403, { error: "Kein Zugriff", code: "NO_ACCESS" });
   const otherId = m.user_a_id === userId ? m.user_b_id : m.user_a_id;
   if (isBlocked(userId, otherId)) {
-    return send(res, 403, { error: "Nachricht kann nicht gesendet werden" });
+    return send(res, 403, { error: "Nachricht kann nicht gesendet werden", code: "BLOCKED_CANNOT_MESSAGE" });
   }
   const text = (body.body || "").trim();
-  if (!text) return send(res, 400, { error: "Nachricht darf nicht leer sein" });
+  if (!text) return send(res, 400, { error: "Nachricht darf nicht leer sein", code: "EMPTY_MESSAGE" });
   const info = db
     .prepare("INSERT INTO messages (match_id, sender_id, body) VALUES (?, ?, ?)")
     .run(matchId, userId, text);
@@ -632,15 +632,15 @@ route("GET", "/api/report/reasons", async (req, res) => {
 
 route("POST", "/api/report", async (req, res, params, body) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const targetId = Number(body.targetId);
   const reason = (body.reason || "").trim();
   const message = (body.message || "").trim();
-  if (!targetId) return send(res, 400, { error: "targetId erforderlich" });
-  if (targetId === userId) return send(res, 400, { error: "Du kannst dich nicht selbst melden" });
-  if (!REPORT_REASONS.includes(reason)) return send(res, 400, { error: "Ungültiger Grund" });
+  if (!targetId) return send(res, 400, { error: "targetId erforderlich", code: "TARGET_ID_REQUIRED" });
+  if (targetId === userId) return send(res, 400, { error: "Du kannst dich nicht selbst melden", code: "CANNOT_REPORT_SELF" });
+  if (!REPORT_REASONS.includes(reason)) return send(res, 400, { error: "Ungültiger Grund", code: "INVALID_REASON" });
   const target = db.prepare("SELECT id FROM users WHERE id = ?").get(targetId);
-  if (!target) return send(res, 404, { error: "Nutzer nicht gefunden" });
+  if (!target) return send(res, 404, { error: "Nutzer nicht gefunden", code: "USER_NOT_FOUND" });
   db.prepare(
     "INSERT INTO reports (reporter_id, reported_id, reason, message) VALUES (?, ?, ?, ?)"
   ).run(userId, targetId, reason, message.slice(0, 2000));
@@ -649,18 +649,18 @@ route("POST", "/api/report", async (req, res, params, body) => {
 
 route("POST", "/api/block/:userId", async (req, res, params) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const targetId = Number(params.userId);
-  if (!targetId || targetId === userId) return send(res, 400, { error: "Ungültiger Nutzer" });
+  if (!targetId || targetId === userId) return send(res, 400, { error: "Ungültiger Nutzer", code: "INVALID_USER" });
   const target = db.prepare("SELECT id FROM users WHERE id = ?").get(targetId);
-  if (!target) return send(res, 404, { error: "Nutzer nicht gefunden" });
+  if (!target) return send(res, 404, { error: "Nutzer nicht gefunden", code: "USER_NOT_FOUND" });
   db.prepare("INSERT OR IGNORE INTO blocks (blocker_id, blocked_id) VALUES (?, ?)").run(userId, targetId);
   send(res, 200, { ok: true });
 });
 
 route("DELETE", "/api/block/:userId", async (req, res, params) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const targetId = Number(params.userId);
   db.prepare("DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?").run(userId, targetId);
   send(res, 200, { ok: true });
@@ -668,7 +668,7 @@ route("DELETE", "/api/block/:userId", async (req, res, params) => {
 
 route("GET", "/api/blocked", async (req, res) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const rows = db
     .prepare(
       `SELECT u.id, u.name, u.photo_url FROM blocks b JOIN users u ON u.id = b.blocked_id
@@ -705,10 +705,10 @@ route("PATCH", "/api/admin/reports/:id", async (req, res, params, body) => {
 // ---------- support ----------
 route("POST", "/api/support", async (req, res, params, body) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const subject = (body.subject || "").trim();
   const message = (body.message || "").trim();
-  if (!subject || !message) return send(res, 400, { error: "Betreff und Nachricht erforderlich" });
+  if (!subject || !message) return send(res, 400, { error: "Betreff und Nachricht erforderlich", code: "SUPPORT_FIELDS_REQUIRED" });
   const user = db.prepare("SELECT email FROM users WHERE id = ?").get(userId);
   const info = db
     .prepare("INSERT INTO support_tickets (user_id, email, subject, message) VALUES (?, ?, ?, ?)")
@@ -718,7 +718,7 @@ route("POST", "/api/support", async (req, res, params, body) => {
 
 route("GET", "/api/support/mine", async (req, res) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   send(
     res,
     200,
@@ -753,7 +753,7 @@ route("GET", "/api/premium/info", async (req, res) => {
 route("POST", "/api/subscribe", async (req, res) => {
   if (STRIPE_ENABLED) return send(res, 400, { error: "Zahlungen laufen über Stripe — nutze /api/checkout/subscribe" });
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
   const base = isPremium(user) ? new Date(user.premium_until) : new Date();
   base.setDate(base.getDate() + PREMIUM_DAYS);
@@ -764,16 +764,16 @@ route("POST", "/api/subscribe", async (req, res) => {
 route("POST", "/api/unsubscribe", async (req, res) => {
   if (STRIPE_ENABLED) return send(res, 400, { error: "Zahlungen laufen über Stripe — nutze /api/billing-portal" });
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   db.prepare("UPDATE users SET premium_until = NULL WHERE id = ?").run(userId);
   send(res, 200, publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(userId)));
 });
 
 // ---- real payments (Stripe) ----
 route("POST", "/api/checkout/subscribe", async (req, res) => {
-  if (!STRIPE_ENABLED) return send(res, 400, { error: "Stripe ist nicht konfiguriert" });
+  if (!STRIPE_ENABLED) return send(res, 400, { error: "Stripe ist nicht konfiguriert", code: "STRIPE_NOT_CONFIGURED" });
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
 
   const session = await stripeRequest("checkout/sessions", {
@@ -804,15 +804,15 @@ route("POST", "/api/checkout/subscribe", async (req, res) => {
 // production deploy the webhook above is the source of truth and this is
 // just a nicer, instant UX on top of it.)
 route("POST", "/api/checkout/confirm", async (req, res, params, body) => {
-  if (!STRIPE_ENABLED) return send(res, 400, { error: "Stripe ist nicht konfiguriert" });
+  if (!STRIPE_ENABLED) return send(res, 400, { error: "Stripe ist nicht konfiguriert", code: "STRIPE_NOT_CONFIGURED" });
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const sessionId = body?.sessionId;
   if (!sessionId) return send(res, 400, { error: "session_id fehlt" });
 
   const session = await stripeGet(`checkout/sessions/${encodeURIComponent(sessionId)}`);
   if (String(session.client_reference_id) !== String(userId)) {
-    return send(res, 403, { error: "Diese Session gehört nicht zu deinem Account" });
+    return send(res, 403, { error: "Diese Session gehört nicht zu deinem Account", code: "SESSION_MISMATCH" });
   }
   if (session.payment_status !== "paid" && session.status !== "complete") {
     return send(res, 200, { premium: false });
@@ -826,11 +826,11 @@ route("POST", "/api/checkout/confirm", async (req, res, params, body) => {
 });
 
 route("POST", "/api/billing-portal", async (req, res) => {
-  if (!STRIPE_ENABLED) return send(res, 400, { error: "Stripe ist nicht konfiguriert" });
+  if (!STRIPE_ENABLED) return send(res, 400, { error: "Stripe ist nicht konfiguriert", code: "STRIPE_NOT_CONFIGURED" });
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
-  if (!user.stripe_customer_id) return send(res, 400, { error: "Kein aktives Abo gefunden" });
+  if (!user.stripe_customer_id) return send(res, 400, { error: "Kein aktives Abo gefunden", code: "NO_ACTIVE_SUBSCRIPTION" });
   const session = await stripeRequest("billing_portal/sessions", {
     customer: user.stripe_customer_id,
     return_url: `${APP_URL}/`,
@@ -841,10 +841,10 @@ route("POST", "/api/billing-portal", async (req, res) => {
 // Public (no login needed): a company buys an ad slot. The ad goes live only
 // after admin approval in /admin.html once payment is confirmed.
 route("POST", "/api/ads/purchase", async (req, res, params, body) => {
-  if (!STRIPE_ENABLED) return send(res, 400, { error: "Zahlungen sind noch nicht aktiv — bitte später erneut versuchen" });
+  if (!STRIPE_ENABLED) return send(res, 400, { error: "Zahlungen sind noch nicht aktiv — bitte später erneut versuchen", code: "ADS_NOT_LIVE" });
   const { emoji, title, adBody, ctaLabel, advertiserEmail } = body;
   if (!title || !adBody || !ctaLabel || !advertiserEmail) {
-    return send(res, 400, { error: "Titel, Text, Button-Text und E-Mail sind erforderlich" });
+    return send(res, 400, { error: "Titel, Text, Button-Text und E-Mail sind erforderlich", code: "AD_FIELDS_REQUIRED" });
   }
   const session = await stripeRequest("checkout/sessions", {
     mode: "payment",
@@ -893,7 +893,7 @@ route("PATCH", "/api/admin/ads/:id", async (req, res, params, body) => {
 
 route("GET", "/api/ads", async (req, res) => {
   const userId = getUserId(req);
-  if (!userId) return send(res, 401, { error: "Nicht angemeldet" });
+  if (!userId) return send(res, 401, { error: "Nicht angemeldet", code: "UNAUTHORIZED" });
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
   if (isPremium(user)) return send(res, 200, null);
   const ad = db
