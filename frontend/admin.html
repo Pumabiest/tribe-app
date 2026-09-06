@@ -20,7 +20,11 @@
   .badge.pending { background: rgba(250, 199, 117, 0.15); color: #fac775; }
   .badge.active { background: rgba(41,224,201,0.15); color: #29e0c9; }
   .badge.rejected { background: rgba(226, 75, 74, 0.15); color: #e24b4a; }
+  .badge.banned { background: rgba(226, 75, 74, 0.15); color: #e24b4a; }
+  .badge.premium { background: rgba(124, 92, 255, 0.15); color: #7c5cff; }
   #key-gate { max-width: 400px; margin: 80px auto; text-align: center; }
+  #user-search { margin-bottom: 12px; }
+  .btn-danger { background: #e24b4a; }
 </style>
 </head>
 <body>
@@ -35,6 +39,9 @@
 
 <div id="admin-app" style="display:none;">
   <h1>TRIBE Admin</h1>
+  <h2>Nutzer (sperren / Premium schenken)</h2>
+  <input type="text" id="user-search" placeholder="Suche nach Name, E-Mail oder ID …" />
+  <div id="users"></div>
   <h2>Meldungen</h2>
   <div id="reports"></div>
   <h2>Werbeanzeigen</h2>
@@ -112,6 +119,102 @@ async function loadTickets() {
   });
 }
 
+function fmtDate(iso) {
+  return iso ? new Date(iso).toLocaleDateString("de-DE") : "";
+}
+
+async function banUser(id) {
+  const reason = prompt("Grund für die Sperrung (wird nur intern gespeichert):", "") || "";
+  if (!confirm("Diesen Account wirklich sperren? Ein aktives oder geschenktes Premium/Abo wird dabei sofort und ohne Erstattung beendet.")) return;
+  await adminFetch(`/api/admin/users/${id}/ban`, { method: "POST", body: JSON.stringify({ reason }) });
+  loadUsers();
+  loadReports();
+}
+
+async function unbanUser(id) {
+  await adminFetch(`/api/admin/users/${id}/unban`, { method: "POST" });
+  loadUsers();
+}
+
+async function grantPremium(id) {
+  const days = Number(prompt("Premium schenken — für wie viele Tage?", "30"));
+  if (!days || days <= 0) return;
+  await adminFetch(`/api/admin/users/${id}/grant-premium`, { method: "POST", body: JSON.stringify({ days }) });
+  loadUsers();
+}
+
+async function revokePremium(id) {
+  if (!confirm("Premium diesem Nutzer entziehen?")) return;
+  await adminFetch(`/api/admin/users/${id}/revoke-premium`, { method: "POST" });
+  loadUsers();
+}
+
+let allUsers = [];
+
+async function loadUsers() {
+  allUsers = await adminFetch("/api/admin/users");
+  renderUsers();
+}
+
+function renderUsers() {
+  const q = document.getElementById("user-search").value.trim().toLowerCase();
+  const el = document.getElementById("users");
+  const filtered = q
+    ? allUsers.filter(
+        (u) =>
+          u.email.toLowerCase().includes(q) ||
+          u.name.toLowerCase().includes(q) ||
+          String(u.id) === q
+      )
+    : allUsers;
+  if (filtered.length === 0) {
+    el.innerHTML = `<p class="muted">Keine Nutzer gefunden.</p>`;
+    return;
+  }
+  el.innerHTML = filtered
+    .map(
+      (u) => `
+    <div class="card" data-id="${u.id}">
+      <div class="row">
+        <div>
+          <strong>${escapeHtml(u.name)}</strong> (#${u.id})
+          ${u.banned ? '<span class="badge banned">gesperrt</span>' : ""}
+          ${u.premium ? '<span class="badge premium">Premium</span>' : ""}
+          <div class="muted">${escapeHtml(u.email)} · registriert ${fmtDate(u.created_at)}</div>
+          ${u.premium ? `<div class="muted">Premium bis ${fmtDate(u.premium_until)}</div>` : ""}
+          ${u.banned ? `<div class="muted">Gesperrt am ${fmtDate(u.banned_at)}${u.ban_reason ? " · Grund: " + escapeHtml(u.ban_reason) : ""}</div>` : ""}
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px; flex-wrap: wrap;">
+        ${
+          u.banned
+            ? '<button class="secondary unban-btn">Entsperren</button>'
+            : '<button class="btn-danger ban-btn">Sperren</button>'
+        }
+        <button class="secondary grant-premium-btn">Premium schenken</button>
+        ${u.premium ? '<button class="secondary revoke-premium-btn">Premium entziehen</button>' : ""}
+      </div>
+    </div>
+  `
+    )
+    .join("");
+
+  el.querySelectorAll(".ban-btn").forEach((btn) => {
+    btn.onclick = () => banUser(btn.closest(".card").dataset.id);
+  });
+  el.querySelectorAll(".unban-btn").forEach((btn) => {
+    btn.onclick = () => unbanUser(btn.closest(".card").dataset.id);
+  });
+  el.querySelectorAll(".grant-premium-btn").forEach((btn) => {
+    btn.onclick = () => grantPremium(btn.closest(".card").dataset.id);
+  });
+  el.querySelectorAll(".revoke-premium-btn").forEach((btn) => {
+    btn.onclick = () => revokePremium(btn.closest(".card").dataset.id);
+  });
+}
+
+document.getElementById("user-search").addEventListener("input", renderUsers);
+
 async function loadReports() {
   const reports = await adminFetch("/api/admin/reports");
   const el = document.getElementById("reports");
@@ -134,6 +237,7 @@ async function loadReports() {
       ${r.message ? `<p>${escapeHtml(r.message)}</p>` : ""}
       <div class="row" style="margin-top:8px;">
         <button class="secondary toggle-report-btn">${r.status === "open" ? "Als erledigt markieren" : "Wieder öffnen"}</button>
+        <button class="btn-danger ban-from-report-btn" data-reported-id="${r.reported_id}">Gemeldete:n Nutzer:in sperren</button>
       </div>
     </div>
   `
@@ -149,6 +253,9 @@ async function loadReports() {
       await adminFetch(`/api/admin/reports/${id}`, { method: "PATCH", body: JSON.stringify({ status: newStatus }) });
       loadReports();
     };
+  });
+  el.querySelectorAll(".ban-from-report-btn").forEach((btn) => {
+    btn.onclick = () => banUser(btn.dataset.reportedId);
   });
 }
 
@@ -202,6 +309,7 @@ async function tryUnlock() {
     document.getElementById("key-gate").style.display = "none";
     document.getElementById("admin-app").style.display = "block";
     localStorage.setItem("tribe_admin_key", ADMIN_KEY);
+    loadUsers();
     loadReports();
     loadTickets();
     loadAds();
