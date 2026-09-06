@@ -115,11 +115,11 @@ const STRINGS = {
     language_picker_title: "Sprache wählen",
     install_button: "📲 App installieren",
     install_inapp_alert:
-      "Du hast den Link in einem In-App-Browser geöffnet (z.B. WhatsApp/Instagram) — von dort geht die Installation leider nicht.\n\nTippe oben rechts auf „⋮" bzw. die drei Punkte und wähle „Im Browser öffnen" (Chrome/Safari). Danach kannst du TRIBE ganz normal installieren.",
+      "Du hast den Link in einem In-App-Browser geöffnet (z.B. WhatsApp/Instagram) — von dort geht die Installation leider nicht.\n\nTippe oben rechts auf 'Weitere Optionen' bzw. die drei Punkte und wähle 'Im Browser öffnen' (Chrome/Safari). Danach kannst du TRIBE ganz normal installieren.",
     install_ios_alert:
-      "So installierst du TRIBE auf dem iPhone:\n\n1. Tippe unten auf das Teilen-Symbol (Quadrat mit Pfeil nach oben)\n2. Wähle „Zum Home-Bildschirm"\n3. Tippe auf „Hinzufügen"",
+      "So installierst du TRIBE auf dem iPhone:\n\n1. Tippe unten auf das Teilen-Symbol (Quadrat mit Pfeil nach oben)\n2. Wähle 'Zum Home-Bildschirm'\n3. Tippe auf 'Hinzufügen'",
     install_generic_alert:
-      "Öffne das Menü deines Browsers (meist drei Punkte oben rechts) und wähle „App installieren" oder „Zum Startbildschirm hinzufügen".",
+      "Öffne das Menü deines Browsers (meist drei Punkte oben rechts) und wähle 'App installieren' oder 'Zum Startbildschirm hinzufügen'.",
     login_tab: "Login",
     register_tab: "Registrieren",
     beta_notice_1:
